@@ -6,7 +6,7 @@ MLB The Show API로부터 데이터를 수집하고,
 
 ---
 
-## 📌 역할
+## 주요기능
 
 - MLB The Show API 데이터 수집
 - 경기 로그 파싱 및 정규화
@@ -16,7 +16,7 @@ MLB The Show API로부터 데이터를 수집하고,
 
 ---
 
-## 🛠 기술 스택
+## 기술 스택
 
 - **NestJS**
 - **TypeScript**
