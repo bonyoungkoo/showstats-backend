@@ -30,7 +30,7 @@ export class PlayerCardService {
   }
 
   async fetchAndSaveCards(): Promise<void> {
-    const BASE_URL = 'https://mlb25.theshow.com/apis/items.json?type=mlb_card';
+    const BASE_URL = 'https://mlb26.theshow.com/apis/items.json?type=mlb_card';
 
     // 1. 첫 페이지 요청
     const firstResponse = await axios.get<PlayerCardApiResponse>(
@@ -223,7 +223,8 @@ export class PlayerCardService {
     const total = await this.playerCardModel.countDocuments(query);
 
     const sortOption: Record<string, 1 | -1> = {
-      [sortField]: sortOrder === 'asc' ? 1 : -1, uuid: 1
+      [sortField]: sortOrder === 'asc' ? 1 : -1,
+      uuid: 1,
     };
 
     const data = await this.playerCardModel

@@ -19,7 +19,7 @@ export class TheShowService {
     username: string,
     gameId: string,
   ): Promise<GameApiResponse> {
-    const url = `https://mlb25.theshow.com/apis/game_log.json?username=${username}&id=${gameId}`;
+    const url = `https://mlb26.theshow.com/apis/game_log.json?username=${username}&id=${gameId}`;
     const response = await this.httpService.axiosRef.get(url);
     return response.data as GameApiResponse;
   }
@@ -30,7 +30,7 @@ export class TheShowService {
     gameId: string,
   ): Promise<boolean> {
     try {
-      const url = `https://mlb25.theshow.com/apis/game_log.json?username=${teammateUsername}&id=${gameId}`;
+      const url = `https://mlb26.theshow.com/apis/game_log.json?username=${teammateUsername}&id=${gameId}`;
       const response = await this.httpService.axiosRef.get(url);
 
       // HTML 에러 페이지가 아닌 실제 JSON 데이터인지 확인
@@ -71,7 +71,7 @@ export class TheShowService {
     username: string,
     page?: number,
   ): Promise<GameHistoryApiResponse> {
-    const url = `https://mlb25.theshow.com/apis/game_history.json?username=${username}&page=${page}`;
+    const url = `https://mlb26.theshow.com/apis/game_history.json?username=${username}&page=${page}`;
     const response = await this.httpService.axiosRef.get(url);
     const gameHistoryData = response.data as GameHistoryApiResponse;
 
@@ -147,7 +147,7 @@ export class TheShowService {
   }
 
   async fetchIconImageUrl(username: string): Promise<string | null> {
-    const url = `https://mlb25.theshow.com/universal_profiles/mlbts/${username}`;
+    const url = `https://mlb26.theshow.com/universal_profiles/mlbts/${username}`;
 
     try {
       const res = await fetch(url);
@@ -167,7 +167,7 @@ export class TheShowService {
 
   async fetchUserInfoFromApi(username: string): Promise<UserInfoApiResponse> {
     // 1. player_search API 호출
-    const playerSearchUrl = `https://mlb25.theshow.com/apis/player_search.json?username=${username}`;
+    const playerSearchUrl = `https://mlb26.theshow.com/apis/player_search.json?username=${username}`;
     const playerResponse = await this.httpService.axiosRef.get(playerSearchUrl);
 
     // 2. 아이콘 이미지 URL 가져오기
