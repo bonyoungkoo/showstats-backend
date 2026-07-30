@@ -1,5 +1,5 @@
 import { HttpService } from '@nestjs/axios';
-import { Injectable } from '@nestjs/common';
+import { BadGatewayException, Injectable } from '@nestjs/common';
 import { GameApiResponse } from 'src/analyzer/types/analysis-result.interface';
 import {
   GameHistoryApiResponse,
@@ -19,9 +19,200 @@ export class TheShowService {
     username: string,
     gameId: string,
   ): Promise<GameApiResponse> {
-    const url = `https://mlb26.theshow.com/apis/game_log.json?username=${username}&id=${gameId}`;
-    const response = await this.httpService.axiosRef.get(url);
-    return response.data as GameApiResponse;
+    const params = new URLSearchParams({
+      username,
+      platform: 'mlbts',
+      id: gameId,
+    });
+    const apiUrl = `https://mlb26.theshow.com/apis/game_log.json?${params.toString()}`;
+
+    try {
+      const response = await this.httpService.axiosRef.get<unknown>(apiUrl);
+      if (this.isGameApiResponse(response.data)) {
+        return response.data;
+      }
+
+      const apiError = this.getApiError(response.data);
+      console.warn(
+        `MLB The Show game_log API 응답 오류 (${gameId}): ${apiError ?? '예상하지 못한 응답 형식'}`,
+      );
+    } catch (error) {
+      console.warn(
+        `MLB The Show game_log API 호출 실패 (${gameId}). 공식 경기 페이지로 재시도합니다.`,
+        error,
+      );
+    }
+
+    return this.fetchGameLogFromPage(username, gameId);
+  }
+
+  private isGameApiResponse(data: unknown): data is GameApiResponse {
+    if (!data || typeof data !== 'object' || !('game' in data)) {
+      return false;
+    }
+
+    const game = (data as { game?: unknown }).game;
+    return (
+      Array.isArray(game) &&
+      game.length >= 2 &&
+      Array.isArray(game[0]) &&
+      game[0][0] === 'line_score' &&
+      Array.isArray(game[1]) &&
+      game[1][0] === 'game_log' &&
+      typeof game[1][1] === 'string'
+    );
+  }
+
+  private getApiError(data: unknown): string | undefined {
+    if (
+      data &&
+      typeof data === 'object' &&
+      'error' in data &&
+      typeof data.error === 'string'
+    ) {
+      return data.error;
+    }
+    return undefined;
+  }
+
+  private async fetchGameLogFromPage(
+    username: string,
+    gameId: string,
+  ): Promise<GameApiResponse> {
+    const params = new URLSearchParams({
+      platform: 'mlbts',
+      username,
+    });
+    const pageUrl = `https://mlb26.theshow.com/games/${encodeURIComponent(gameId)}?${params.toString()}`;
+
+    try {
+      const response = await this.httpService.axiosRef.get<string>(pageUrl, {
+        responseType: 'text',
+      });
+      return this.parseGamePage(response.data, gameId);
+    } catch (error) {
+      console.error(
+        `MLB The Show 경기 상세 페이지 처리 실패 (${gameId}):`,
+        error,
+      );
+      throw new BadGatewayException(
+        'MLB The Show에서 경기 상세 기록을 가져오지 못했습니다.',
+      );
+    }
+  }
+
+  private parseGamePage(html: string, gameId: string): GameApiResponse {
+    const summaryTableMatch = html.match(
+      /<div class=['"]well['"]>[\s\S]*?<\/div>\s*<table>([\s\S]*?)<\/table>/i,
+    );
+    const gameLogMatch = html.match(
+      /<h3>\s*Game Log\s*<\/h3>([\s\S]*?)<\/div>/i,
+    );
+
+    if (!summaryTableMatch || !gameLogMatch) {
+      throw new Error(`경기 ${gameId}의 라인스코어 또는 게임 로그가 없습니다.`);
+    }
+
+    const tableHtml = summaryTableMatch[1];
+    const innings = [...tableHtml.matchAll(/<th>\s*(\d+)\s*<\/th>/gi)].map(
+      (match) => match[1],
+    );
+    const rows = [...tableHtml.matchAll(/<tr>([\s\S]*?)<\/tr>/gi)]
+      .map((match) =>
+        [...match[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map((cell) =>
+          this.htmlToText(cell[1]),
+        ),
+      )
+      .filter(
+        (cells) =>
+          cells.length >= 7 &&
+          Boolean(cells[1]) &&
+          Boolean(cells[2]) &&
+          ['W', 'L'].includes(cells[3]),
+      );
+
+    if (rows.length < 2) {
+      throw new Error(`경기 ${gameId}의 라인스코어 형식을 해석할 수 없습니다.`);
+    }
+
+    const [awayRow, homeRow] = rows;
+    const buildTeam = (row: string[]) => ({
+      fullName: row[1],
+      playerName: row[2],
+      result: row[3],
+      runs: row.at(-3) ?? '0',
+      hits: row.at(-2) ?? '0',
+    });
+    const away = buildTeam(awayRow);
+    const home = buildTeam(homeRow);
+    const gameLog = gameLogMatch[1]
+      .replace(/<br\s*\/?>/gi, '^n')
+      .replace(/<[^>]+>/g, '')
+      .trim()
+      .replace(
+        /(^|\^n)(?=[A-Za-z][A-Za-z\s.'-]+ batting\.)/g,
+        '$1^',
+      );
+
+    if (!gameLog) {
+      throw new Error(`경기 ${gameId}의 게임 로그가 비어 있습니다.`);
+    }
+
+    return {
+      game: [
+        [
+          'line_score',
+          {
+            inning: innings.at(-1) ?? '',
+            innings: String(innings.length),
+            home_full_name: home.fullName,
+            away_full_name: away.fullName,
+            home_name: home.playerName,
+            away_name: away.playerName,
+            home_runs: home.runs,
+            away_runs: away.runs,
+            home_hits: home.hits,
+            away_hits: away.hits,
+            home_display_result: home.result,
+            away_display_result: away.result,
+            game_mode: '',
+            game_uuid: gameId,
+          },
+        ],
+        ['game_log', this.decodeHtmlEntities(gameLog)],
+        ['box_score', []],
+      ],
+    };
+  }
+
+  private htmlToText(html: string): string {
+    return this.decodeHtmlEntities(
+      html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(),
+    );
+  }
+
+  private decodeHtmlEntities(value: string): string {
+    const namedEntities: Record<string, string> = {
+      amp: '&',
+      apos: "'",
+      gt: '>',
+      lt: '<',
+      nbsp: ' ',
+      quot: '"',
+    };
+
+    return value.replace(
+      /&(#x[\da-f]+|#\d+|amp|apos|gt|lt|nbsp|quot);/gi,
+      (entity, code: string) => {
+        if (code.startsWith('#x')) {
+          return String.fromCodePoint(Number.parseInt(code.slice(2), 16));
+        }
+        if (code.startsWith('#')) {
+          return String.fromCodePoint(Number.parseInt(code.slice(1), 10));
+        }
+        return namedEntities[code.toLowerCase()] ?? entity;
+      },
+    );
   }
 
   // 팀원 닉네임으로 게임 조회 (2:2 게임 판단용)
